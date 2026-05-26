@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NaviGo — Çoklu Durak Navigasyon</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #111318;
+    --surface2: #1a1d24;
+    --border: #252830;
+    --accent: #00e5ff;
+    --accent2: #7c3aed;
+    --accent3: #f59e0b;
+    --danger: #ef4444;
+    --success: #22c55e;
+    --text: #f0f2f8;
+    --muted: #6b7280;
+    --active: #00e5ff22;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    top: -30%; left: -20%;
+    width: 60%; height: 60%;
+    background: radial-gradient(ellipse, #00e5ff08 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: -20%; right: -10%;
+    width: 50%; height: 50%;
+    background: radial-gradient(ellipse, #7c3aed08 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+
+  .app {
+    position: relative; z-index: 1;
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0 0 100px;
+  }
+
+  /* HEADER */
+  header {
+    padding: 28px 20px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: linear-gradient(180deg, var(--bg) 0%, transparent 100%);
+    position: sticky; top: 0; z-index: 200;
+    backdrop-filter: blur(12px);
+  }
+
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 0 20px #00e5ff30;
+  }
+  .logo-text {
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 22px;
+    letter-spacing: -0.5px;
+    background: linear-gradient(90deg, var(--accent), #fff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+
+  .eta-badge {
+    font-size: 10px; color: var(--muted);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 20px;
+    letter-spacing: 1px; text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* MAP */
+  .map-container {
+    margin: 16px;
+    border-radius: 20px; overflow: hidden;
+    border: 1px solid var(--border);
+    position: relative; background: var(--surface);
+    height: 240px; flex-shrink: 0;
+  }
+
+  #map {
+    width: 100%; height: 100%;
+    background: #0d1117;
+  }
+
+  /* Leaflet dark overrides */
+  .leaflet-tile-pane { filter: brightness(0.85) saturate(0.7) hue-rotate(180deg) invert(0.9); }
+  .leaflet-container { background: #0d1117 !important; }
+  .leaflet-control-zoom a {
+    background: var(--surface2) !important;
+    border-color: var(--border) !important;
+    color: var(--text) !important;
+  }
+  .leaflet-control-zoom a:hover { background: var(--surface) !important; }
+  .leaflet-control-attribution {
+    background: rgba(10,12,16,0.7) !important;
+    color: var(--muted) !important;
+    font-size: 9px !important;
+  }
+  .leaflet-control-attribution a { color: var(--accent) !important; }
+  .leaflet-popup-content-wrapper {
+    background: var(--surface2) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 32px #00000080 !important;
+  }
+  .leaflet-popup-tip { background: var(--surface2) !important; }
+  .leaflet-popup-content { font-family: 'DM Mono', monospace !important; font-size: 12px !important; }
+
+  .map-overlay-top {
+    position: absolute; top: 12px; left: 12px; right: 12px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none; z-index: 1000;
+  }
+  .map-status {
+    background: rgba(10,12,16,0.85); backdrop-filter: blur(8px);
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 8px 14px; font-size: 11px; color: var(--accent);
+    letter-spacing: 0.5px; pointer-events: all;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .map-status:hover { border-color: var(--accent); }
+  .map-status.live { animation: pulse-border 2s infinite; }
+  @keyframes pulse-border {
+    0%, 100% { box-shadow: 0 0 0 0 #00e5ff20; }
+    50% { box-shadow: 0 0 0 6px #00e5ff00; }
+  }
+
+  /* ROUTE PANEL */
+  .route-panel {
+    margin: 0 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: visible;
+    position: relative;
+  }
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-title {
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px;
+    letter-spacing: 0.5px; color: var(--muted); text-transform: uppercase;
+  }
+  .stop-count {
+    font-size: 11px; background: var(--active); color: var(--accent);
+    padding: 3px 10px; border-radius: 20px; border: 1px solid #00e5ff30;
+  }
+
+  /* STOPS LIST */
+  .stops-list { padding: 10px 0; max-height: 320px; overflow-y: auto; }
+  .stops-list::-webkit-scrollbar { width: 3px; }
+  .stops-list::-webkit-scrollbar-track { background: transparent; }
+  .stops-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .stop-item {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 12px 18px;
+    position: relative; transition: background 0.2s;
+    cursor: grab;
+    user-select: none;
+  }
+  .stop-item:hover { background: #ffffff05; }
+  .stop-item.active { background: var(--active); }
+  .stop-item.completed { opacity: 0.5; }
+  .stop-item.completed .stop-name { text-decoration: line-through; }
+  .stop-item.dragging { opacity: 0.4; background: var(--active); }
+  .stop-item.drag-over { border-top: 2px solid var(--accent); }
+
+  /* connector line */
+  .stop-item:not(:last-child) .stop-node-wrap::after {
+    content: '';
+    position: absolute;
+    left: 26px; top: 46px; bottom: -12px;
+    width: 2px;
+    background: linear-gradient(180deg, var(--border), transparent);
+    z-index: 0;
+  }
+
+  .stop-node-wrap {
+    position: relative; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding-top: 2px;
+  }
+  .stop-node {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 2px solid var(--border); background: var(--surface2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 500; color: var(--muted);
+    z-index: 1; position: relative; transition: all 0.3s; flex-shrink: 0;
+  }
+  .stop-item.active .stop-node {
+    border-color: var(--accent); background: var(--accent); color: var(--bg);
+    box-shadow: 0 0 16px #00e5ff50;
+    animation: node-pulse 2s infinite;
+  }
+  .stop-item.completed .stop-node {
+    border-color: var(--success); background: var(--success); color: var(--bg);
+  }
+  @keyframes node-pulse {
+    0%, 100% { box-shadow: 0 0 8px #00e5ff50; }
+    50% { box-shadow: 0 0 20px #00e5ff80; }
+  }
+
+  .stop-info { flex: 1; min-width: 0; }
+  .stop-label {
+    font-size: 9px; color: var(--muted);
+    letter-spacing: 1.5px; text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+  .stop-item.active .stop-label { color: var(--accent); }
+  .stop-name {
+    font-family: 'Syne', sans-serif; font-weight: 600; font-size: 14px;
+    color: var(--text); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; margin-bottom: 3px;
+  }
+  .stop-address {
+    font-size: 11px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .stop-coords {
+    font-size: 10px; color: #00e5ff50; margin-top: 2px;
+    font-style: italic;
+  }
+
+  .stop-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+  .stop-btn {
+    width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--surface2);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all 0.2s; font-size: 14px; color: var(--muted);
+  }
+  .stop-btn:hover { border-color: var(--danger); color: var(--danger); background: #ef444415; }
+  .drag-handle {
+    cursor: grab; color: var(--muted); font-size: 16px;
+    padding: 2px 0;
+    transition: color 0.2s;
+  }
+  .drag-handle:hover { color: var(--accent); }
+
+  /* GEOCODE INPUT + SUGGESTIONS */
+  .add-stop-form { padding: 14px 18px; border-top: 1px solid var(--border); }
+  .input-row { display: flex; gap: 10px; position: relative; }
+
+  .unit-row {
+    display: flex; gap: 8px; margin-top: 8px;
+  }
+  .unit-input {
+    flex: 1;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 8px 12px;
+    font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text);
+    outline: none; transition: all 0.2s;
+  }
+  .unit-input::placeholder { color: var(--muted); }
+  .unit-input:focus { border-color: var(--accent2); box-shadow: 0 0 0 2px #7c3aed15; }
+
+  .unit-add-btn {
+    padding: 8px 14px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; cursor: pointer; font-size: 11px;
+    color: var(--accent2); font-family: 'DM Mono', monospace;
+    transition: all 0.2s; white-space: nowrap; flex-shrink: 0;
+  }
+  .unit-add-btn:hover { border-color: var(--accent2); background: #7c3aed15; }
+
+  /* Units on stop card */
+  .unit-list {
+    display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px;
+  }
+  .unit-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #7c3aed18; border: 1px solid #7c3aed40;
+    border-radius: 7px; padding: 3px 8px;
+    font-size: 10px; color: #a78bfa;
+    font-family: 'DM Mono', monospace;
+  }
+  .unit-chip .blok-lbl { color: #c4b5fd; font-weight: 500; }
+  .unit-chip .daire-lbl { color: var(--muted); }
+  .unit-chip .rm-unit {
+    cursor: pointer; color: var(--muted); font-size: 11px; margin-left: 2px;
+    line-height: 1; transition: color 0.15s; background: none; border: none;
+    padding: 0; font-family: inherit;
+  }
+  .unit-chip .rm-unit:hover { color: var(--danger); }
+
+  .unit-count-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #7c3aed22; border: 1px solid #7c3aed44;
+    border-radius: 6px; padding: 2px 7px; margin-top: 5px;
+    font-size: 10px; color: #a78bfa; letter-spacing: 0.5px;
+  }
+
+  /* Current card units */
+  .current-units {
+    margin-top: 10px;
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .current-unit-chip {
+    background: #00e5ff12; border: 1px solid #00e5ff35;
+    border-radius: 8px; padding: 5px 10px;
+    font-size: 11px; color: var(--accent);
+    font-family: 'DM Mono', monospace;
+  }
+  .current-unit-chip.done {
+    background: #22c55e12; border-color: #22c55e35; color: var(--success);
+    text-decoration: line-through; opacity: 0.6;
+  }
+  .stop-input {
+    flex: 1;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 10px 14px;
+    font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text);
+    outline: none; transition: all 0.2s;
+  }
+  .stop-input::placeholder { color: var(--muted); }
+  .stop-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px #00e5ff15; }
+
+  .add-btn {
+    width: 42px; height: 42px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none; border-radius: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; color: var(--bg); font-weight: bold;
+    transition: all 0.2s; flex-shrink: 0;
+    box-shadow: 0 4px 16px #00e5ff30;
+  }
+  .add-btn:hover { transform: scale(1.05); box-shadow: 0 6px 20px #00e5ff50; }
+  .add-btn:active { transform: scale(0.97); }
+  .add-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* SUGGESTIONS DROPDOWN */
+  .suggestions {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 52px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+    z-index: 500; box-shadow: 0 8px 32px #00000060;
+    max-height: 200px; overflow-y: auto;
+  }
+  .suggestions:empty { display: none; }
+  .suggestion-item {
+    padding: 10px 14px; cursor: pointer;
+    font-size: 12px; color: var(--text);
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    line-height: 1.4;
+  }
+  .suggestion-item:last-child { border-bottom: none; }
+  .suggestion-item:hover { background: var(--active); color: var(--accent); }
+  .suggestion-item .sug-name { font-family: 'Syne', sans-serif; font-weight: 600; font-size: 13px; }
+  .suggestion-item .sug-addr { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .suggestion-loading {
+    padding: 12px 14px; font-size: 11px; color: var(--muted);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .spin { animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* VOICE */
+  .voice-section {
+    margin: 14px 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 18px;
+  }
+  .voice-title {
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 12px;
+    letter-spacing: 1px; color: var(--muted); text-transform: uppercase;
+    margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
+  }
+  .voice-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .voice-commands-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px;
+  }
+  .cmd-chip {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 8px 12px; font-size: 11px; color: var(--muted);
+    text-align: center; transition: all 0.2s;
+  }
+  .cmd-chip span { display: block; color: var(--accent); font-weight: 500; margin-bottom: 2px; font-size: 12px; }
+  .mic-area { display: flex; align-items: center; gap: 14px; }
+  .mic-btn {
+    width: 60px; height: 60px; border-radius: 50%;
+    border: 2px solid var(--border); background: var(--surface2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; cursor: pointer; transition: all 0.3s;
+    flex-shrink: 0; position: relative; overflow: hidden;
+  }
+  .mic-btn::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(circle, var(--accent2) 0%, transparent 70%);
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .mic-btn:hover::before { opacity: 0.3; }
+  .mic-btn.listening { border-color: var(--danger); animation: mic-pulse 1s infinite; }
+  .mic-btn.listening::before {
+    background: radial-gradient(circle, var(--danger) 0%, transparent 70%);
+    opacity: 0.2;
+  }
+  @keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 #ef444430; }
+    50% { box-shadow: 0 0 0 12px #ef444400; }
+  }
+  .voice-status { flex: 1; }
+  .voice-status-label { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .voice-transcript { font-size: 13px; color: var(--text); min-height: 20px; font-style: italic; line-height: 1.4; }
+
+  /* NAV CONTROLS */
+  .nav-controls { margin: 0 16px 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .nav-btn {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 14px 18px; cursor: pointer;
+    display: flex; align-items: center; gap: 10px;
+    transition: all 0.2s; color: var(--text);
+    font-family: 'DM Mono', monospace; font-size: 12px; text-align: left;
+  }
+  .nav-btn:hover { background: var(--surface2); transform: translateY(-1px); }
+  .nav-btn .btn-icon {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .nav-btn.next-stop {
+    grid-column: 1 / -1;
+    background: linear-gradient(135deg, #00e5ff15, #7c3aed15);
+    border-color: #00e5ff40;
+  }
+  .nav-btn.next-stop:hover { background: linear-gradient(135deg, #00e5ff25, #7c3aed25); box-shadow: 0 4px 20px #00e5ff20; }
+  .nav-btn.next-stop .btn-icon { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  .nav-btn.start-nav .btn-icon { background: #22c55e20; }
+  .nav-btn.reset-nav .btn-icon { background: #ef444420; }
+  .btn-text { flex: 1; }
+  .btn-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 2px; }
+  .btn-main { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px; }
+
+  /* TOAST */
+  .toast {
+    position: fixed; bottom: 110px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2); border: 1px solid var(--accent);
+    color: var(--text); padding: 12px 20px; border-radius: 14px;
+    font-size: 12px; opacity: 0; transition: all 0.3s;
+    z-index: 9999; max-width: 340px; text-align: center;
+    box-shadow: 0 8px 32px #00e5ff20; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.error { border-color: var(--danger); box-shadow: 0 8px 32px #ef444420; }
+  .toast.success { border-color: var(--success); box-shadow: 0 8px 32px #22c55e20; }
+
+  /* CURRENT STOP CARD */
+  .current-card {
+    margin: 0 16px 14px;
+    background: linear-gradient(135deg, #00e5ff08, #7c3aed08);
+    border: 1px solid #00e5ff30; border-radius: 20px;
+    padding: 16px 18px; display: none;
+  }
+  .current-card.visible { display: block; }
+  .current-card-label {
+    font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .live-dot {
+    width: 6px; height: 6px; background: var(--accent);
+    border-radius: 50%; animation: blink 1.2s infinite;
+  }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+  .current-name {
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 20px;
+    letter-spacing: -0.5px; margin-bottom: 4px;
+  }
+  .current-address { font-size: 12px; color: var(--muted); }
+  .progress-bar {
+    margin-top: 14px; height: 3px;
+    background: var(--border); border-radius: 2px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 2px; transition: width 0.5s ease;
+  }
+
+  .empty-state { padding: 30px 18px; text-align: center; }
+  .empty-icon { font-size: 40px; margin-bottom: 10px; }
+  .empty-text { font-family: 'Syne', sans-serif; font-weight: 600; font-size: 14px; color: var(--muted); }
+  .empty-sub { font-size: 11px; color: var(--muted); margin-top: 4px; opacity: 0.6; }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* ROUTE INFO BAR */
+  .route-info-bar {
+    display: flex; gap: 8px; padding: 10px 18px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-chip {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 10px;
+    font-size: 10px; color: var(--muted); letter-spacing: 0.5px;
+  }
+  .info-chip .val { color: var(--accent); font-size: 11px; font-family: 'Syne', sans-serif; font-weight: 700; }
+  .route-info-bar.hidden { display: none; }
+
+  /* LOCATE ME */
+  .locate-btn {
+    background: rgba(10,12,16,0.85); backdrop-filter: blur(8px);
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 8px 14px; font-size: 11px; color: var(--muted);
+    cursor: pointer; transition: all 0.2s; font-family: 'DM Mono', monospace;
+  }
+  .locate-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- HEADER -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🧭</div>
+      <div class="logo-text">NaviGo</div>
+    </div>
+    <div class="eta-badge" id="eta-badge">Hazır</div>
+  </header>
+
+  <!-- MAP -->
+  <div class="map-container">
+    <div id="map"></div>
+    <div class="map-overlay-top">
+      <div class="map-status live" id="map-status" onclick="fitMapToBounds()">📍 Harita</div>
+      <button class="locate-btn" onclick="locateMe()">◎ Konumum</button>
+    </div>
+  </div>
+
+  <!-- CURRENT STOP CARD -->
+  <div class="current-card" id="current-card">
+    <div class="current-card-label">
+      <div class="live-dot"></div>
+      Aktif Durak
+    </div>
+    <div class="current-name" id="current-stop-name">—</div>
+    <div class="current-address" id="current-stop-addr">—</div>
+    <div class="current-units" id="current-units"></div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+    </div>
+  </div>
+
+  <!-- ROUTE PANEL -->
+  <div class="route-panel">
+    <div class="panel-header">
+      <div class="panel-title">Güzergah</div>
+      <div class="stop-count" id="stop-count">0 Durak</div>
+    </div>
+
+    <div class="route-info-bar hidden" id="route-info-bar">
+      <div class="info-chip">🗺️ <span class="val" id="info-dist">—</span> km</div>
+      <div class="info-chip">🕐 <span class="val" id="info-time">—</span> dk</div>
+      <div class="info-chip">📍 <span class="val" id="info-stops">—</span> durak</div>
+    </div>
+
+    <div class="stops-list" id="stops-list">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">🗺️</div>
+        <div class="empty-text">Henüz durak eklenmedi</div>
+        <div class="empty-sub">Aşağıdan durak ekleyin veya sesli komut kullanın</div>
+      </div>
+    </div>
+
+    <div class="add-stop-form">
+      <div class="input-row">
+        <input type="text" class="stop-input" id="stop-input" 
+               placeholder="Adres veya yer adı giriniz…" 
+               autocomplete="off" />
+        <button class="add-btn" id="add-btn" onclick="triggerAddStop()" title="Durak Ekle">+</button>
+      </div>
+      <div class="suggestions" id="suggestions"></div>
+      <div class="unit-row">
+        <input type="text" class="unit-input" id="blok-input" placeholder="Blok (opsiyonel)" autocomplete="off" />
+        <input type="text" class="unit-input" id="daire-input" placeholder="Daire No" autocomplete="off" />
+        <button class="unit-add-btn" onclick="addUnitToPending()" title="Daire Ekle">＋ Daire</button>
+      </div>
+      <div class="unit-list" id="pending-units"></div>
+    </div>
+  </div>
+
+  <!-- NAV CONTROLS -->
+  <div class="nav-controls" style="margin-top: 14px;">
+    <button class="nav-btn next-stop" onclick="nextStop()">
+      <div class="btn-icon" style="color: white;">➡️</div>
+      <div class="btn-text">
+        <div class="btn-label">Sesli: "Sıradaki durak"</div>
+        <div class="btn-main">Sonraki Durağa Geç</div>
+      </div>
+    </button>
+    <button class="nav-btn start-nav" onclick="startNavigation()">
+      <div class="btn-icon">🚀</div>
+      <div class="btn-text">
+        <div class="btn-label">Başlat</div>
+        <div class="btn-main">Navigasyon</div>
+      </div>
+    </button>
+    <button class="nav-btn reset-nav" onclick="resetAll()">
+      <div class="btn-icon">🔄</div>
+      <div class="btn-text">
+        <div class="btn-label">Sıfırla</div>
+        <div class="btn-main">Güzergah</div>
+      </div>
+    </button>
+  </div>
+
+  <!-- VOICE -->
+  <div class="voice-section">
+    <div class="voice-title">Sesli Komutlar</div>
+    <div class="voice-commands-grid">
+      <div class="cmd-chip"><span>"Sıradaki durak"</span>Sonraki durağa geç</div>
+      <div class="cmd-chip"><span>"Durak ekle [ad]"</span>Yeni durak ekle</div>
+      <div class="cmd-chip"><span>"Navigasyonu başlat"</span>Rotayı başlat</div>
+      <div class="cmd-chip"><span>"Sıfırla"</span>Güzergahı temizle</div>
+    </div>
+    <div class="mic-area">
+      <button class="mic-btn" id="mic-btn" onclick="toggleListening()">🎤</button>
+      <div class="voice-status">
+        <div class="voice-status-label" id="voice-label">Mikrofona tıklayarak sesli komut verin</div>
+        <div class="voice-transcript" id="voice-transcript">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let stops = [];
+let currentIndex = 0;
+let isNavigating = false;
+let recognition = null;
+let isListening = false;
+let synth = window.speechSynthesis;
+let map = null;
+let markers = [];
+let routeLayer = null;
+let userMarker = null;
+let suggestTimeout = null;
+let pendingGeocode = null; // { name, lat, lon, display }
+let pendingUnits = []; // [{ blok, daire }]
+
+// ─── MAP INIT ─────────────────────────────────────────────────────────────────
+function initMap() {
+  map = L.map('map', {
+    center: [39.9334, 32.8597], // Ankara
+    zoom: 12,
+    zoomControl: true,
+    attributionControl: true
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://openstreetmap.org">OSM</a>',
+    maxZoom: 19
+  }).addTo(map);
+}
+
+// ─── CUSTOM MARKERS ──────────────────────────────────────────────────────────
+function makeMarkerIcon(label, isActive, isCompleted) {
+  const color = isCompleted ? '#22c55e' : isActive ? '#00e5ff' : '#7c3aed';
+  const textColor = '#0a0c10';
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:30px;height:30px;border-radius:50%;
+      background:${color};
+      border:2px solid ${isActive ? '#fff' : color};
+      display:flex;align-items:center;justify-content:center;
+      font-size:11px;font-weight:700;color:${textColor};
+      font-family:'DM Mono',monospace;
+      box-shadow:0 0 ${isActive ? '16px' : '8px'} ${color}80;
+    ">${isCompleted ? '✓' : label}</div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -18]
+  });
+}
+
+// ─── MAP UPDATE ───────────────────────────────────────────────────────────────
+function updateMapMarkers() {
+  // Remove old markers
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  // Remove route
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+
+  if (stops.length === 0) return;
+
+  const latlngs = [];
+
+  stops.forEach((stop, i) => {
+    const isActive = isNavigating && i === currentIndex;
+    const icon = makeMarkerIcon(i + 1, isActive, stop.completed);
+    const m = L.marker([stop.lat, stop.lon], { icon })
+      .addTo(map)
+      .bindPopup(`<strong>${stop.name}</strong><br><span style="color:#6b7280;font-size:10px">${stop.displayName}</span>`);
+    if (isActive) m.openPopup();
+    markers.push(m);
+    latlngs.push([stop.lat, stop.lon]);
+  });
+
+  // Draw route line
+  if (latlngs.length > 1) {
+    routeLayer = L.polyline(latlngs, {
+      color: '#00e5ff',
+      weight: 3,
+      opacity: 0.7,
+      dashArray: '8, 6'
+    }).addTo(map);
+  }
+
+  updateRouteInfo();
+}
+
+function fitMapToBounds() {
+  if (stops.length === 0) {
+    map.setView([39.9334, 32.8597], 12);
+    return;
+  }
+  if (stops.length === 1) {
+    map.setView([stops[0].lat, stops[0].lon], 15);
+    return;
+  }
+  const bounds = L.latLngBounds(stops.map(s => [s.lat, s.lon]));
+  map.fitBounds(bounds, { padding: [40, 40] });
+}
+
+function updateRouteInfo() {
+  const bar = document.getElementById('route-info-bar');
+  if (stops.length < 2) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+
+  // Haversine mesafe
+  let totalKm = 0;
+  for (let i = 0; i < stops.length - 1; i++) {
+    totalKm += haversine(stops[i].lat, stops[i].lon, stops[i+1].lat, stops[i+1].lon);
+  }
+  const avgSpeedKmh = 40;
+  const timeMin = Math.round((totalKm / avgSpeedKmh) * 60);
+
+  document.getElementById('info-dist').textContent = totalKm.toFixed(1);
+  document.getElementById('info-time').textContent = timeMin;
+  document.getElementById('info-stops').textContent = stops.length;
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ─── GEOCODING (Nominatim) ────────────────────────────────────────────────────
+async function geocodeSearch(query) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1&accept-language=tr`;
+  try {
+    const r = await fetch(url, { headers: { 'Accept-Language': 'tr' } });
+    return await r.json();
+  } catch (e) {
+    return [];
+  }
+}
+
+async function showSuggestions(query) {
+  const box = document.getElementById('suggestions');
+  if (!query || query.length < 2) { box.innerHTML = ''; return; }
+
+  box.innerHTML = '<div class="suggestion-loading"><span class="spin">⟳</span> Aranıyor…</div>';
+
+  const results = await geocodeSearch(query);
+
+  if (!results || results.length === 0) {
+    box.innerHTML = '<div class="suggestion-loading" style="color:#ef4444">Sonuç bulunamadı</div>';
+    setTimeout(() => { box.innerHTML = ''; }, 2000);
+    return;
+  }
+
+  box.innerHTML = '';
+  results.slice(0, 5).forEach(r => {
+    const item = document.createElement('div');
+    item.className = 'suggestion-item';
+    const name = r.name || r.display_name.split(',')[0];
+    const addr = r.display_name;
+    item.innerHTML = `<div class="sug-name">${name}</div><div class="sug-addr">${addr.substring(0, 60)}…</div>`;
+    item.addEventListener('click', () => {
+      selectSuggestion(r);
+    });
+    box.appendChild(item);
+  });
+}
+
+function selectSuggestion(r) {
+  const name = r.name || r.display_name.split(',')[0];
+  document.getElementById('stop-input').value = name;
+  document.getElementById('suggestions').innerHTML = '';
+  pendingGeocode = {
+    name: name,
+    lat: parseFloat(r.lat),
+    lon: parseFloat(r.lon),
+    displayName: r.display_name
+  };
+  addStopFromGeocode(pendingGeocode);
+  pendingGeocode = null;
+}
+
+// ─── STOPS MANAGEMENT ────────────────────────────────────────────────────────
+async function triggerAddStop() {
+  const input = document.getElementById('stop-input');
+  const val = input.value.trim();
+  if (!val) { showToast('Lütfen bir yer adı veya adres girin.', 'error'); return; }
+
+  // If pending geocode (from suggestion), use it
+  if (pendingGeocode) {
+    addStopFromGeocode(pendingGeocode);
+    pendingGeocode = null;
+    return;
+  }
+
+  // Otherwise geocode the input
+  const btn = document.getElementById('add-btn');
+  btn.disabled = true;
+  btn.textContent = '⟳';
+  document.getElementById('suggestions').innerHTML = '<div class="suggestion-loading"><span class="spin">⟳</span> Konum aranıyor…</div>';
+
+  const results = await geocodeSearch(val);
+  btn.disabled = false;
+  btn.textContent = '+';
+  document.getElementById('suggestions').innerHTML = '';
+
+  if (!results || results.length === 0) {
+    showToast(`"${val}" için konum bulunamadı.`, 'error');
+    return;
+  }
+
+  const r = results[0];
+  addStopFromGeocode({
+    name: capitalizeWords(val),
+    lat: parseFloat(r.lat),
+    lon: parseFloat(r.lon),
+    displayName: r.display_name
+  });
+}
+
+function addStopFromGeocode({ name, lat, lon, displayName }) {
+  const stop = {
+    id: Date.now(),
+    name: name,
+    lat, lon,
+    displayName: displayName,
+    completed: false,
+    units: [...pendingUnits] // copy pending units
+  };
+  stops.push(stop);
+  // Clear inputs
+  document.getElementById('stop-input').value = '';
+  document.getElementById('blok-input').value = '';
+  document.getElementById('daire-input').value = '';
+  document.getElementById('suggestions').innerHTML = '';
+  pendingUnits = [];
+  renderPendingUnits();
+  saveToStorage();
+  renderStops();
+  updateMapMarkers();
+  const unitNote = stop.units.length > 0 ? ` (${stop.units.length} daire)` : '';
+  if (stops.length === 1) {
+    map.setView([lat, lon], 14);
+  } else {
+    fitMapToBounds();
+  }
+  showToast(`"${stop.name}"${unitNote} eklendi ✓`, 'success');
+}
+
+// ─── PENDING UNITS ───────────────────────────────────────────────────────────
+function addUnitToPending() {
+  const blokEl = document.getElementById('blok-input');
+  const daireEl = document.getElementById('daire-input');
+  const blok = blokEl.value.trim();
+  const daire = daireEl.value.trim();
+  if (!daire) { showToast('Daire numarası giriniz.', 'error'); daireEl.focus(); return; }
+  pendingUnits.push({ blok, daire });
+  blokEl.value = '';
+  daireEl.value = '';
+  daireEl.focus();
+  renderPendingUnits();
+}
+
+function renderPendingUnits() {
+  const container = document.getElementById('pending-units');
+  container.innerHTML = '';
+  pendingUnits.forEach((u, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'unit-chip';
+    chip.innerHTML = `
+      ${u.blok ? `<span class="blok-lbl">Blok ${u.blok}</span>` : ''}
+      <span class="daire-lbl">Daire ${u.daire}</span>
+      <button class="rm-unit" onclick="removePendingUnit(${i})" title="Kaldır">✕</button>
+    `;
+    container.appendChild(chip);
+  });
+}
+
+function removePendingUnit(i) {
+  pendingUnits.splice(i, 1);
+  renderPendingUnits();
+}
+
+// ─── ADD UNIT TO EXISTING STOP ────────────────────────────────────────────────
+function addUnitToStop(stopId) {
+  const blok = prompt('Blok (boş bırakılabilir):') || '';
+  const daire = prompt('Daire No:');
+  if (!daire) return;
+  const stop = stops.find(s => s.id === stopId);
+  if (!stop) return;
+  if (!stop.units) stop.units = [];
+  stop.units.push({ blok: blok.trim(), daire: daire.trim() });
+  saveToStorage();
+  renderStops();
+  showToast(`Daire ${daire} eklendi`, 'success');
+}
+
+function removeUnit(stopId, unitIdx) {
+  const stop = stops.find(s => s.id === stopId);
+  if (!stop || !stop.units) return;
+  stop.units.splice(unitIdx, 1);
+  saveToStorage();
+  renderStops();
+}
+
+async function addStopByName(name) {
+  if (!name) return;
+  const results = await geocodeSearch(name);
+  if (!results || results.length === 0) {
+    showToast(`"${name}" bulunamadı`, 'error');
+    speak(`${name} konumu bulunamadı.`);
+    return;
+  }
+  const r = results[0];
+  addStopFromGeocode({
+    name: capitalizeWords(name),
+    lat: parseFloat(r.lat),
+    lon: parseFloat(r.lon),
+    displayName: r.display_name
+  });
+  speak(`${name} güzergaha eklendi.`);
+}
+
+function removeStop(id) {
+  const idx = stops.findIndex(s => s.id === id);
+  if (idx === -1) return;
+  const name = stops[idx].name;
+  stops.splice(idx, 1);
+  if (currentIndex >= stops.length && currentIndex > 0) currentIndex = stops.length - 1;
+  saveToStorage();
+  renderStops();
+  updateMapMarkers();
+  showToast(`"${name}" kaldırıldı`);
+}
+
+function renderStops() {
+  const list = document.getElementById('stops-list');
+  const empty = document.getElementById('empty-state');
+  const countEl = document.getElementById('stop-count');
+
+  countEl.textContent = `${stops.length} Durak`;
+
+  // Remove stop-item divs only - keep empty-state node in DOM
+  Array.from(list.querySelectorAll('.stop-item')).forEach(el => el.remove());
+
+  if (stops.length === 0) {
+    empty.style.display = 'block';
+    updateCurrentCard();
+    updateEta();
+    return;
+  }
+
+  empty.style.display = 'none';
+
+  stops.forEach((stop, i) => {
+    const div = document.createElement('div');
+    div.className = 'stop-item' +
+      (i === currentIndex && isNavigating ? ' active' : '') +
+      (stop.completed ? ' completed' : '');
+    div.draggable = true;
+    div.dataset.idx = i;
+
+    const label = i === 0 ? 'Başlangıç' : i === stops.length - 1 ? 'Son Durak' : `Durak ${i}`;
+    const shortAddr = stop.displayName ? stop.displayName.substring(0, 50) + (stop.displayName.length > 50 ? '…' : '') : '';
+    const coords = `${stop.lat.toFixed(4)}, ${stop.lon.toFixed(4)}`;
+
+    const unitsHtml = (stop.units && stop.units.length > 0)
+      ? `<div class="unit-list" style="margin-top:6px">` +
+        stop.units.map((u, ui) =>
+          `<div class="unit-chip">
+            ${u.blok ? `<span class="blok-lbl">Blok ${u.blok}</span>` : ''}
+            <span class="daire-lbl">Daire ${u.daire}</span>
+            <button class="rm-unit" onclick="event.stopPropagation();removeUnit(${stop.id},${ui})" title="Kaldır">✕</button>
+          </div>`
+        ).join('') +
+        `</div><div class="unit-count-badge">🏠 ${stop.units.length} daire</div>`
+      : '';
+
+    div.innerHTML = `
+      <div class="stop-node-wrap">
+        <div class="stop-node">${stop.completed ? '✓' : (i + 1)}</div>
+      </div>
+      <div class="stop-info" onclick="focusStop(${i})">
+        <div class="stop-label">${label}</div>
+        <div class="stop-name">${stop.name}</div>
+        <div class="stop-address">${shortAddr}</div>
+        <div class="stop-coords">📌 ${coords}</div>
+        ${unitsHtml}
+      </div>
+      <div class="stop-actions">
+        <button class="stop-btn" onclick="event.stopPropagation();addUnitToStop(${stop.id})" title="Daire Ekle" style="font-size:11px">＋🏠</button>
+        <button class="stop-btn" onclick="event.stopPropagation();removeStop(${stop.id})" title="Kaldır">✕</button>
+        <div class="drag-handle" title="Sürükle">⠿</div>
+      </div>
+    `;
+
+    // Drag & Drop
+    div.addEventListener('dragstart', handleDragStart);
+    div.addEventListener('dragover', handleDragOver);
+    div.addEventListener('drop', handleDrop);
+    div.addEventListener('dragend', handleDragEnd);
+
+    list.appendChild(div);
+  });
+
+  updateCurrentCard();
+  updateEta();
+}
+
+function focusStop(i) {
+  if (!stops[i]) return;
+  map.setView([stops[i].lat, stops[i].lon], 15);
+  if (markers[i]) markers[i].openPopup();
+}
+
+function updateCurrentCard() {
+  const card = document.getElementById('current-card');
+  if (!isNavigating || stops.length === 0) { card.classList.remove('visible'); return; }
+  card.classList.add('visible');
+  const stop = stops[currentIndex];
+  if (!stop) { card.classList.remove('visible'); return; }
+  document.getElementById('current-stop-name').textContent = stop.name;
+  document.getElementById('current-stop-addr').textContent = stop.displayName || '';
+
+  // Show units in current card
+  const unitsEl = document.getElementById('current-units');
+  unitsEl.innerHTML = '';
+  if (stop.units && stop.units.length > 0) {
+    stop.units.forEach(u => {
+      const chip = document.createElement('div');
+      chip.className = 'current-unit-chip';
+      chip.textContent = (u.blok ? `Blok ${u.blok} ` : '') + `Daire ${u.daire}`;
+      unitsEl.appendChild(chip);
+    });
+  }
+
+  const completed = stops.filter(s => s.completed).length;
+  const pct = stops.length > 1 ? (completed / (stops.length - 1)) * 100 : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+}
+
+function updateEta() {
+  const el = document.getElementById('eta-badge');
+  if (!isNavigating || stops.length === 0) { el.textContent = 'Hazır'; }
+  else { el.textContent = `${stops.length - currentIndex} Durak Kaldı`; }
+}
+
+// ─── DRAG & DROP ──────────────────────────────────────────────────────────────
+let dragIdx = null;
+function handleDragStart(e) { dragIdx = parseInt(e.currentTarget.dataset.idx); e.currentTarget.classList.add('dragging'); }
+function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function handleDrop(e) {
+  e.preventDefault();
+  const toIdx = parseInt(e.currentTarget.dataset.idx);
+  if (dragIdx === null || dragIdx === toIdx) return;
+  const moved = stops.splice(dragIdx, 1)[0];
+  stops.splice(toIdx, 0, moved);
+  currentIndex = 0;
+  saveToStorage();
+  renderStops();
+  updateMapMarkers();
+}
+function handleDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.stop-item').forEach(el => el.classList.remove('drag-over'));
+  dragIdx = null;
+}
+
+// ─── NAVIGATION ───────────────────────────────────────────────────────────────
+function startNavigation() {
+  if (stops.length === 0) { showToast('Önce durak ekleyin.', 'error'); return; }
+  isNavigating = true;
+  currentIndex = 0;
+  stops.forEach(s => s.completed = false);
+  renderStops();
+  updateMapMarkers();
+  fitMapToBounds();
+  showToast('Navigasyon başladı! 🚀', 'success');
+  const first = stops[0];
+  const firstUnits = first.units && first.units.length > 0
+    ? `. ${first.units.length} ziyaret: ` + first.units.map(u => (u.blok ? `Blok ${u.blok} ` : '') + `Daire ${u.daire}`).join(', ')
+    : '';
+  speak(`Navigasyon başladı. İlk durağınız: ${first.name}${firstUnits}`);
+}
+
+function nextStop() {
+  if (!isNavigating) { showToast('Önce navigasyonu başlatın.', 'error'); return; }
+  if (stops.length === 0) { speak('Güzergahta durak bulunmuyor.'); return; }
+  if (currentIndex >= stops.length) { showToast('Tüm duraklara ulaşıldı!', 'success'); return; }
+
+  stops[currentIndex].completed = true;
+  currentIndex++;
+
+  if (currentIndex >= stops.length) {
+    renderStops();
+    updateMapMarkers();
+    isNavigating = false;
+    updateEta();
+    showToast('🏁 Tüm duraklara ulaşıldı!', 'success');
+    speak('Güzergahtaki tüm duraklara ulaştınız. Navigasyon tamamlandı. Güle güle!');
+    document.getElementById('current-card').classList.remove('visible');
+    return;
+  }
+
+  const next = stops[currentIndex];
+  renderStops();
+  updateMapMarkers();
+  map.setView([next.lat, next.lon], 15);
+  // markers is repopulated by updateMapMarkers, open popup after short delay
+  setTimeout(() => { if (markers[currentIndex]) markers[currentIndex].openPopup(); }, 100);
+  const unitCount = (next.units && next.units.length > 0) ? next.units.length : 0;
+  const unitSpeech = unitCount > 0
+    ? `. ${unitCount} ziyaret: ` + next.units.map(u => (u.blok ? `Blok ${u.blok} ` : '') + `Daire ${u.daire}`).join(', ')
+    : '';
+  const toastUnits = unitCount > 0 ? ` · ${unitCount} daire` : '';
+  showToast(`Sonraki durak: ${next.name}${toastUnits}`, 'success');
+  speak(`Sıradaki durak: ${next.name}${unitSpeech}`);
+}
+
+function resetAll() {
+  stops = [];
+  currentIndex = 0;
+  isNavigating = false;
+  saveToStorage();
+  renderStops();
+  updateMapMarkers();
+  fitMapToBounds();
+  showToast('Güzergah sıfırlandı.');
+  speak('Güzergah sıfırlandı.');
+}
+
+// ─── LOCATE ME ────────────────────────────────────────────────────────────────
+function locateMe() {
+  if (!navigator.geolocation) { showToast('Konum servisi desteklenmiyor.', 'error'); return; }
+  showToast('Konum alınıyor…');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude, longitude } = pos.coords;
+    if (userMarker) map.removeLayer(userMarker);
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="width:14px;height:14px;border-radius:50%;background:#00e5ff;border:3px solid #fff;box-shadow:0 0 12px #00e5ffaa;"></div>`,
+      iconSize: [14, 14], iconAnchor: [7, 7]
+    });
+    userMarker = L.marker([latitude, longitude], { icon }).addTo(map).bindPopup('📍 Konumunuz');
+    map.setView([latitude, longitude], 14);
+    showToast('Konumunuz bulundu ✓', 'success');
+  }, err => {
+    showToast('Konum alınamadı: ' + err.message, 'error');
+  });
+}
+
+// ─── LOCAL STORAGE ────────────────────────────────────────────────────────────
+function saveToStorage() {
+  try { localStorage.setItem('navigo_stops', JSON.stringify(stops)); } catch(e) {}
+}
+function loadFromStorage() {
+  try {
+    const d = localStorage.getItem('navigo_stops');
+    if (d) {
+      const parsed = JSON.parse(d);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Reset nav state on load - don't restore mid-navigation
+        stops = parsed.map(s => ({ ...s, completed: false }));
+        isNavigating = false;
+        currentIndex = 0;
+        renderStops();
+        updateMapMarkers();
+        fitMapToBounds();
+        showToast(`${stops.length} durak yüklendi ✓`, 'success');
+      }
+    }
+  } catch(e) {}
+}
+
+// ─── SPEECH SYNTHESIS ────────────────────────────────────────────────────────
+function speak(text) {
+  if (!synth) return;
+  synth.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.lang = 'tr-TR'; utt.rate = 0.95; utt.pitch = 1.0;
+  const voices = synth.getVoices();
+  const trVoice = voices.find(v => v.lang.startsWith('tr'));
+  if (trVoice) utt.voice = trVoice;
+  synth.speak(utt);
+}
+
+// ─── SPEECH RECOGNITION ──────────────────────────────────────────────────────
+function initSpeechRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { console.warn('Speech recognition not supported'); return; }
+  recognition = new SR();
+  recognition.lang = 'tr-TR';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 3;
+
+  recognition.onstart = () => {
+    isListening = true;
+    document.getElementById('mic-btn').classList.add('listening');
+    document.getElementById('mic-btn').textContent = '🔴';
+    document.getElementById('voice-label').textContent = 'Dinliyorum…';
+    document.getElementById('voice-transcript').textContent = '';
+  };
+  recognition.onresult = (e) => {
+    let interim = '', final = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) final += t; else interim += t;
+    }
+    document.getElementById('voice-transcript').textContent = (final || interim) || '—';
+    if (final) processVoiceCommand(final.trim().toLowerCase());
+  };
+  recognition.onerror = (e) => {
+    stopListening();
+    if (e.error !== 'no-speech') showToast('Ses tanıma hatası: ' + e.error, 'error');
+  };
+  recognition.onend = stopListening;
+}
+
+function toggleListening() {
+  if (!recognition) { initSpeechRecognition(); }
+  if (!recognition) { showToast('Sesli komut desteklenmiyor.', 'error'); return; }
+  if (isListening) recognition.stop(); else recognition.start();
+}
+
+function stopListening() {
+  isListening = false;
+  document.getElementById('mic-btn').classList.remove('listening');
+  document.getElementById('mic-btn').textContent = '🎤';
+  document.getElementById('voice-label').textContent = 'Mikrofona tıklayarak sesli komut verin';
+}
+
+function processVoiceCommand(cmd) {
+  if (cmd.includes('sıradaki') || cmd.includes('sonraki') || cmd.includes('ileri') || cmd.includes('geç')) {
+    nextStop(); return;
+  }
+  if (cmd.includes('başlat') || cmd.includes('navigasyon') || cmd.includes('yol tarifi')) {
+    startNavigation(); return;
+  }
+  if (cmd.includes('sıfırla') || cmd.includes('temizle') || cmd.includes('baştan')) {
+    resetAll(); return;
+  }
+  const addPatterns = [
+    /durak ekle\s+(.+)/,
+    /ekle\s+(.+)/,
+    /(.+)\s+ekle/,
+    /(.+)\s+dura[gğ][ıi]/,
+    /(.+)\s+git/,
+  ];
+  for (const pat of addPatterns) {
+    const m = cmd.match(pat);
+    if (m && m[1] && m[1].length > 1) {
+      addStopByName(m[1].trim()); return;
+    }
+  }
+  showToast(`"${cmd}" — komut tanınamadı`, 'error');
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function capitalizeWords(str) {
+  return str.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+let toastTimer;
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = 'toast'; }, 3000);
+}
+
+// ─── INPUT AUTOCOMPLETE ──────────────────────────────────────────────────────
+document.getElementById('stop-input').addEventListener('input', (e) => {
+  clearTimeout(suggestTimeout);
+  const val = e.target.value.trim();
+  if (val.length < 2) { document.getElementById('suggestions').innerHTML = ''; return; }
+  suggestTimeout = setTimeout(() => showSuggestions(val), 400);
+});
+
+document.getElementById('stop-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { triggerAddStop(); }
+  if (e.key === 'Escape') { document.getElementById('suggestions').innerHTML = ''; }
+});
+
+document.getElementById('daire-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { addUnitToPending(); }
+});
+document.getElementById('blok-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { document.getElementById('daire-input').focus(); }
+});
+
+// Close suggestions on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.add-stop-form')) {
+    document.getElementById('suggestions').innerHTML = '';
+  }
+});
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+initMap();
+if (synth) { synth.onvoiceschanged = () => synth.getVoices(); synth.getVoices(); }
+initSpeechRecognition();
+renderStops();
+loadFromStorage();
+
+setTimeout(() => {
+  if (stops.length === 0) showToast('NaviGo hazır! Adres arayarak durak ekleyin.', '');
+}, 600);
+</script>
+</body>
+</html>
